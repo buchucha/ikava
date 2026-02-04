@@ -1,0 +1,7 @@
+{
+  "name": "IKAVA MEDICAL CENTER EMR SYSTEM 3.0.3",
+  "description": "image storage & order section building",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
