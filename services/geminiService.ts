@@ -26,7 +26,7 @@ const parseAIResponse = (text: string | undefined) => {
  */
 export const getDiagnosticSuggestions = async (patient: Patient, soap: Partial<SOAPRecord>) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     const prompt = `
       As a veterinary expert, recommend a list of diagnostic tests (imaging, blood tests, cytology, etc.) based on the patient's information.
       Important: Do not include actual treatments (medication, surgery); suggest only tests for diagnosis.
@@ -73,7 +73,7 @@ export const getDiagnosticSuggestions = async (patient: Patient, soap: Partial<S
  */
 export const getDifferentialDiagnoses = async (patient: Patient, soap: Partial<SOAPRecord>) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     const labInfo = JSON.stringify(soap.labResults || {});
     const prompt = `
       Based on the patient's information, suggest a list of potential differential diagnoses (DDx).
@@ -120,7 +120,7 @@ export const getDifferentialDiagnoses = async (patient: Patient, soap: Partial<S
  */
 export const getTxSuggestions = async (patient: Patient, soap: Partial<SOAPRecord>) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     const prompt = `
       As a veterinarian, recommend a list of actual treatments (Tx), surgeries, or procedures.
       Strict Rule: Do not include diagnostic tests like CT, MRI, X-ray, or blood tests. Only include treatment actions (fluid therapy, medication administration, dressing, surgery, etc.).
@@ -168,7 +168,7 @@ export const getTxSuggestions = async (patient: Patient, soap: Partial<SOAPRecor
  */
 export const getRxSuggestions = async (patient: Patient, soap: Partial<SOAPRecord>) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     const prompt = `
       As a veterinary pharmacology expert, recommend a prescription (Rx).
       Include dosage, frequency/route, and detailed precautions.
@@ -216,7 +216,7 @@ export const getRxSuggestions = async (patient: Patient, soap: Partial<SOAPRecor
  */
 export const getSummarySuggestions = async (patient: Patient, soap: Partial<SOAPRecord>) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     const prompt = `
       Write a discharge summary for the owner. Write in English. Maintain a professional yet warm and gentle tone.
       Patient: ${patient.name} (${patient.species}, ${patient.weight}kg).
