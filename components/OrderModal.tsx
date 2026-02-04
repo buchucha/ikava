@@ -13,6 +13,64 @@ export const uploadToSupabase = async (file: File) => {
   return urlData.publicUrl;
 };
 
+export const deleteFromSupabase = async (url: string) => {
+  try {
+    const filePath = url.split('/order_images/')[1];
+    if (!filePath) return false;
+    
+    const { error } = await supabase.storage.from('order_images').remove([filePath]);
+    if (error) {
+      console.error('Supabase storage delete error:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Supabase storage delete failed:', error);
+    return false;
+  }
+};
+
+export const deleteFromNAS = async (url: string): Promise<boolean> => {
+  try {
+    const urlObj = new URL(url);
+    const filename = urlObj.pathname.split('/uploads/')[1];
+    if (!filename) return false;
+
+    const response = await fetch(`http://localhost:3000/delete/${filename}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('NAS delete error:', response.status, response.statusText);
+      return false;
+    }
+
+    const result = await response.json();
+    return result.success;
+  } catch (error) {
+    console.error('NAS delete failed:', error);
+    return false;
+  }
+};
+
+export const deleteImageFromAllStorage = async (url: string) => {
+  const results = await Promise.allSettled([
+    deleteFromSupabase(url),
+    deleteFromNAS(url)
+  ]);
+
+  const supabaseResult = results[0];
+  const nasResult = results[1];
+
+  console.log('Image deletion results:', {
+    supabase: supabaseResult.status === 'fulfilled' ? supabaseResult.value : false,
+    nas: nasResult.status === 'fulfilled' ? nasResult.value : false
+  });
+};
+
 const DEPARTMENTS: { value: DepartmentType; label: string; icon: string; color: string }[] = [
   { value: 'Treatment', label: '처치실', icon: 'fa-briefcase-medical', color: 'text-indigo-600' },
   { value: 'Pharmacy', label: '약제실', icon: 'fa-pills', color: 'text-emerald-600' },
@@ -116,7 +174,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
            </div>
            <div className="w-1/3 p-5 flex flex-col bg-slate-50/30">
               <div className="flex justify-between items-center mb-3"><h4 className="text-[10px] font-black uppercase text-slate-500">Clinical Media</h4><button onClick={() => fileInputRef.current?.click()} className="px-3 py-1 bg-slate-900 text-white rounded text-[9px] font-black uppercase">Add Media</button><input type="file" ref={fileInputRef} hidden multiple accept="image/*" onChange={handleImageUpload} /></div>
-              <div className="flex-1 overflow-y-auto border-2 border-dashed border-slate-200 rounded-xl p-2 bg-white">{orderImages.map((img, idx) => (<div key={idx} className="relative group bg-slate-50 border border-slate-200 rounded-lg overflow-hidden mb-2"><img src={img.url} className="w-full aspect-square object-cover" alt="" /><button onClick={() => setOrderImages(p => p.filter((_,i)=>i!==idx))} className="absolute top-1 right-1 w-5 h-5 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"><i className="fas fa-times text-[10px]"></i></button></div>))}</div>
+               <div className="flex-1 overflow-y-auto border-2 border-dashed border-slate-200 rounded-xl p-2 bg-white">{orderImages.map((img, idx) => (<div key={idx} className="relative group bg-slate-50 border border-slate-200 rounded-lg overflow-hidden mb-2"><img src={img.url} className="w-full aspect-square object-cover" alt="" /><button onClick={async () => {
+                 await deleteImageFromAllStorage(img.url);
+                 setOrderImages(p => p.filter((_,i)=>i!==idx));
+               }} className="absolute top-1 right-1 w-5 h-5 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"><i className="fas fa-times text-[10px]"></i></button></div>))}</div>
            </div>
         </div>
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
