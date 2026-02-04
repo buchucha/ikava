@@ -73,6 +73,35 @@ app.post('/upload', upload.single('image'), (req, res) => {
   res.json({ url: fileUrl });
 });
 
+// 삭제 라우트
+app.delete('/delete/:filename', (req, res) => {
+  const filename = req.params.filename;
+  if (!filename) {
+    return res.status(400).json({ error: 'Filename required' });
+  }
+
+  // 보안 체크: 파일 경로 조작 방지
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+
+  const filePath = path.join(UPLOAD_DIR, filename);
+  
+  // 파일 존재 여부 확인
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  try {
+    fs.unlinkSync(filePath);
+    console.log(`[Image Deleted] ${filename}`);
+    res.json({ success: true, message: 'File deleted successfully' });
+  } catch (err) {
+    console.error(`[Delete Error] ${filename}:`, err);
+    res.status(500).json({ error: 'Failed to delete file' });
+  }
+});
+
 // --- 서버 실행 ---
 
 // 1. HTTPS 모드 (인증서가 있는 경우 - 권장)
