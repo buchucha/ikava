@@ -1,368 +1,379 @@
 
-import React, { useState, useMemo } from 'react';
-import { Patient, Veterinarian, WaitlistEntry, SOAPRecord, SOAPField, ClinicSettings, DepartmentType, BillingItem, DepartmentOrder, OrderImage } from '../types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { SOAPRecord, Patient, Veterinarian, ClinicSettings, SOAPField, DepartmentType, BillingItem, OrderImage, WaitlistEntry } from '../types';
+import { supabase } from '../services/supabaseClient';
 import { PatientSidebar } from './PatientSidebar';
 import { SOAPEditor } from './SOAPEditor';
 import { HistoryCard } from './HistoryCard';
 import { OrderModal } from './OrderModal';
-import { supabase } from '../services/supabaseClient';
+import { SelectionModal } from './SelectionModal';
+import { PacsViewer } from './PacsViewer';
+import { 
+  getDiagnosticSuggestions, 
+  getDifferentialDiagnoses, 
+  getTxSuggestions, 
+  getRxSuggestions, 
+  getSummarySuggestions 
+} from '../services/geminiService';
 
 interface ConsultationPageProps {
-  patients: Patient[];
+  activePatient: Patient | null;
+  onImageDoubleClick: (src: string) => void;
   vets: Veterinarian[];
+  clinicSettings: ClinicSettings;
+  patients: Patient[];
   waitlist: WaitlistEntry[];
-  selectedPatientId: string;
   onSelectPatient: (id: string) => void;
-  // Fix: Removed duplicate onUpdateWaitlist property
   onAddToWaitlist: (entry: Partial<WaitlistEntry>) => Promise<void>;
   onUpdateWaitlist: (id: string, updates: Partial<WaitlistEntry>) => Promise<void>;
   onRemoveFromWaitlist: (id: string) => Promise<void>;
-  
-  soapStep: 'S' | 'O' | 'A' | 'P';
-  setSoapStep: (step: 'S' | 'O' | 'A' | 'P') => void;
+  activeSoapCc?: string | null;
+  onActiveSoapChange?: (cc: string | null) => void;
   currentSoap: Partial<SOAPRecord>;
-  onUpdateSoap: (field: SOAPField, value: any) => void;
-  isSavingSoap: boolean;
-  onSaveSoap: () => void;
-  history: SOAPRecord[];
-  onLoadHistory: (record: SOAPRecord) => void;
-  setViewingImage: (src: string | null) => void;
-  onNewChart: (pId: string) => void;
-  
-  onSuggestTests: () => void;
-  onSuggestDdx: () => void;
-  onSuggestTx: () => void;
-  onSuggestRx: () => void;
-  onSuggestSummary: () => void;
-  clinicSettings: ClinicSettings;
+  onUpdateSoap: (updated: Partial<SOAPRecord>) => void;
 }
 
-const PatientHeader: React.FC<{ 
-  patient: Patient; 
-  activeSoapId?: string;
-  onOpenOrder: () => void;
-}> = ({ patient, activeSoapId, onOpenOrder }) => (
-  <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0 shadow-sm z-10">
-    <div className="flex items-center gap-6">
-      <div className="flex items-center gap-4">
-        <img src={patient.avatar} alt={patient.name} className="w-10 h-10 rounded-xl object-cover border border-slate-200 shadow-sm" />
-        <div>
-          <h2 className="text-lg font-black text-slate-900 leading-none">{patient.name}</h2>
-          <span className="text-xs font-bold text-slate-500">{patient.breed} • {patient.gender}</span>
-        </div>
-      </div>
-      <div className="h-8 w-px bg-slate-100"></div>
-      <div className="flex gap-6">
-        <div className="flex flex-col">
-           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Age</span>
-           <span className="text-sm font-bold text-slate-700">{patient.age}</span>
-        </div>
-        <div className="flex flex-col">
-           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Weight</span>
-           <span className="text-sm font-bold text-blue-600">{patient.weight} kg</span>
-        </div>
-      </div>
-    </div>
-    
-    <div className="flex items-center gap-3">
-       <button 
-         onClick={onOpenOrder}
-         className="flex items-center gap-2 px-6 py-2 rounded-lg transition-all shadow-md active:scale-95 bg-blue-600 text-white hover:bg-blue-700"
-       >
-         <i className="fas fa-clipboard-list text-sm"></i>
-         <span className="text-xs font-black uppercase tracking-wide">Place Order</span>
-       </button>
-    </div>
-  </div>
-);
-
-export const ConsultationPage: React.FC<ConsultationPageProps> = (props) => {
-  const [sidebarWidth, setSidebarWidth] = useState(300);
-  const [isResizing, setIsResizing] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [collapsedVets, setCollapsedVets] = useState<Record<string, boolean>>({});
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
+export const ConsultationPage: React.FC<ConsultationPageProps> = ({ 
+  activePatient, onImageDoubleClick, vets, clinicSettings,
+  patients, waitlist, onSelectPatient, onAddToWaitlist, onUpdateWaitlist, onRemoveFromWaitlist,
+  activeSoapCc, onActiveSoapChange, currentSoap, onUpdateSoap
+}) => {
+  const [activeStep, setActiveStep] = useState<'S' | 'O' | 'A' | 'P'>('S');
+  const [history, setHistory] = useState<SOAPRecord[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   
-  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [aiModal, setAiModal] = useState<{ 
+    isOpen: boolean; title: string; icon: string; field: keyof SOAPRecord; options: any[]; isLoading: boolean; 
+  }>({ isOpen: false, title: '', icon: '', field: 'subjective', options: [], isLoading: false });
 
-  const activePatient = useMemo(() => 
-    props.patients.find(p => p.id === props.selectedPatientId), 
-    [props.patients, props.selectedPatientId]
-  );
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [isPacsOpen, setIsPacsOpen] = useState(false);
+
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [collapsedVets, setCollapsedVets] = useState<Record<string, boolean>>({});
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [draggedItemType, setDraggedItemType] = useState<'patient' | 'waitlist' | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  // 상단에서 X를 눌러 activeSoapCc가 null이 되면 에디터도 초기화
+  useEffect(() => {
+    if (activeSoapCc === null && currentSoap.id) {
+      onUpdateSoap({ subjective: '', objective: '', assessmentProblems: '', assessmentDdx: [], planTx: '', planRx: '', planSummary: '', patientId: activePatient?.id });
+      setActiveStep('S');
+    }
+  }, [activeSoapCc, currentSoap.id, activePatient?.id, onUpdateSoap]);
+
+  const handleResize = useCallback((e: MouseEvent) => {
+    if (isResizingSidebar) {
+      const newWidth = e.clientX;
+      if (newWidth >= 200 && newWidth <= 450) setSidebarWidth(newWidth);
+    }
+  }, [isResizingSidebar]);
+
+  const stopResizing = useCallback(() => setIsResizingSidebar(false), []);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', handleResize);
+    window.addEventListener('mouseup', stopResizing);
+    return () => {
+      window.removeEventListener('mousemove', handleResize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [handleResize, stopResizing]);
 
   const searchResults = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (query.length < 1) return [];
-    return props.patients.filter(p => 
+    return patients.filter(p => 
       p.name.toLowerCase().includes(query) || 
       p.owner.toLowerCase().includes(query) || 
-      (p.chartNumber && p.chartNumber.toLowerCase().includes(query))
+      p.phone.includes(query) ||
+      (p.chartNumber || '').toLowerCase().includes(query)
     );
-  }, [searchTerm, props.patients]);
+  }, [searchTerm, patients]);
 
   const waitlistByVet = useMemo(() => {
     const groups: Record<string, WaitlistEntry[]> = { 'unassigned': [] };
-    props.vets.forEach(v => groups[v.id] = []);
-    props.waitlist.forEach(w => {
+    vets.forEach(v => groups[v.id] = []);
+    waitlist.forEach(w => {
       const vid = w.vetId;
       if (vid && groups[vid]) groups[vid].push(w);
       else groups['unassigned'].push(w);
     });
     return groups;
-  }, [props.waitlist, props.vets]);
+  }, [waitlist, vets]);
 
-  const handleDragStart = (e: React.DragEvent, id: string, type: 'patient' | 'waitlist') => {
-    e.dataTransfer.setData('id', id);
-    e.dataTransfer.setData('type', type);
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetVetId: string) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData('id');
-    const type = e.dataTransfer.getData('type');
-    if (type === 'waitlist') {
-      await props.onUpdateWaitlist(id, { vetId: targetVetId });
-    } else if (type === 'patient') {
-      const p = props.patients.find(pat => pat.id === id);
-      if (p) await props.onAddToWaitlist({ patientId: p.id, patientName: p.name, breed: p.breed, ownerName: p.owner, vetId: targetVetId, memo: '', type: 'Consultation' });
-    }
-    setDragOverId(null);
-  };
-
-  const handleDeleteHistoryImage = async (soapId: string, imgUrl: string) => {
-    try {
-      const { data: soapData, error: soapError } = await supabase
-        .from('soap_records')
-        .select('images')
-        .eq('id', soapId)
-        .single();
-      
-      if (soapError) throw soapError;
-      
-      const currentImages: string[] = Array.isArray(soapData.images) ? soapData.images : [];
-      const updatedImages = currentImages.filter(url => url !== imgUrl);
-
-      const { error: soapUpdateError } = await supabase
-        .from('soap_records')
-        .update({ images: updatedImages })
-        .eq('id', soapId);
-      
-      if (soapUpdateError) throw soapUpdateError;
-
-      const { data: ordersData } = await supabase
-        .from('department_orders')
-        .select('id, images, attachment_url')
-        .eq('soap_id', soapId);
-      
-      if (ordersData && ordersData.length > 0) {
-        for (const order of ordersData) {
-          const orderImages: OrderImage[] = Array.isArray(order.images) ? order.images : [];
-          const updatedOrderImages = orderImages.filter(img => img.url !== imgUrl);
-          
-          let newAttachmentUrl = order.attachment_url;
-          if (order.attachment_url === imgUrl) {
-            newAttachmentUrl = updatedOrderImages.length > 0 ? updatedOrderImages[0].url : null;
-          }
-
-          await supabase
-            .from('department_orders')
-            .update({ 
-              images: updatedOrderImages,
-              attachment_url: newAttachmentUrl
-            })
-            .eq('id', order.id);
-        }
-      }
-
-      if (props.currentSoap?.id === soapId) {
-        props.onUpdateSoap('images', updatedImages);
-      }
-    } catch (err: any) {
-      console.error('Image deletion failed:', err.message);
-    }
-  };
-
-  const handleSaveOrder = async (vetName: string, details: string, items: BillingItem[], vetId: string, soapId: string, department: DepartmentType, images: OrderImage[], status: 'Pending' | 'In Progress' | 'Completed' = 'Pending') => {
-    // CRITICAL FIX: !soapId 체크 제거. soapId가 없어도 오더 저장이 가능해야 합니다.
+  const fetchHistory = useCallback(async () => {
     if (!activePatient) return;
-    setIsSubmittingOrder(true);
-    try {
-      const primaryUrl = images && images.length > 0 ? images[0].url : null;
-      const { data: newOrder, error: orderError } = await supabase.from('department_orders').insert([{
-        patient_id: activePatient.id,
-        patient_name: activePatient.name,
-        soap_id: soapId || null, // SOAP ID가 없으면 null로 전송
-        department: department,
-        vet_name: vetName,
-        request_details: details,
-        status: status,
-        order_index: 0, 
-        items: items,
-        images: images, 
-        attachment_url: primaryUrl
-      }]).select().single();
-
-      if (orderError) throw orderError;
-
-      // SOAP ID가 있는 경우에만 이미지 동기화
-      if (soapId && images && images.length > 0) {
-        const { data: currentSoapData } = await supabase.from('soap_records').select('images').eq('id', soapId).single();
-        const existingImages: string[] = Array.isArray(currentSoapData?.images) ? currentSoapData.images : [];
-        const newUrls = images.map(img => img.url);
-        const combined = Array.from(new Set([...existingImages, ...newUrls]));
-        await supabase.from('soap_records').update({ images: combined }).eq('id', soapId);
-        props.onUpdateSoap('images', combined);
-      }
-
-      if (items.length > 0 && newOrder) {
-        let { data: invoice } = await supabase.from('billing_invoices').select('id').eq('patient_id', activePatient.id).eq('status', 'Unpaid').single();
-        if (!invoice) {
-           const { data: newInv } = await supabase.from('billing_invoices').insert({ patient_id: activePatient.id, status: 'Unpaid' }).select().single();
-           invoice = newInv;
-        }
-        if (invoice) {
-           const billingItemsPayload = items.map(item => ({
-              invoice_id: invoice.id,
-              linked_order_id: newOrder.id,
-              service_id: item.service_id,
-              item_name: item.name,
-              category: item.category,
-              unit_price: item.unit_price,
-              quantity: item.quantity || 1,
-              total_price: item.total_price,
-              performing_vet_id: vetId || null
-           }));
-           await supabase.from('billing_items').insert(billingItemsPayload);
-        }
-      }
-      setIsOrderModalOpen(false);
-    } catch (e: any) {
-      console.error('Failed to send order:', e.message);
-    } finally {
-      setIsSubmittingOrder(false);
+    const { data, error } = await supabase
+      .from('soap_records')
+      .select('*, department_orders!soap_records_order_id_fkey(id, images)')
+      .eq('patient_id', activePatient.id)
+      .order('date', { ascending: false });
+    if (error) { console.error("Error fetching history:", error); return; }
+    if (data) {
+        setHistory(data.map((db: any) => {
+            const linkedOrder = db.department_orders;
+            const orderImages = (linkedOrder?.images || []).map((img: any) => typeof img === 'string' ? img : img.url).filter(Boolean);
+            return { id: db.id, patientId: db.patient_id, order_id: db.order_id, date: db.date, cc: db.cc, subjective: db.subjective, objective: db.objective, assessmentProblems: db.assessment_problems, assessment_ddx: db.assessment_ddx || [], planTx: db.plan_tx, planRx: db.plan_rx, plan_summary: db.plan_summary, images: orderImages };
+        }));
     }
+  }, [activePatient]);
+
+  // 환자가 변경될 때 히스토리만 새로 불러옵니다. (에디터 초기화 로직은 App.tsx로 이동됨)
+  useEffect(() => { 
+      if (activePatient) { fetchHistory(); }
+  }, [activePatient?.id, fetchHistory]);
+
+  const handleUpdateSoapField = (field: string, value: any) => {
+    onUpdateSoap({ ...currentSoap, [field]: value });
+  };
+
+  const handleSaveSoap = async () => {
+    if (!activePatient) return;
+    setIsSaving(true);
+    try {
+      const payload = { patient_id: activePatient.id, date: currentSoap.date || new Date().toISOString().split('T')[0], cc: currentSoap.cc, subjective: currentSoap.subjective, objective: currentSoap.objective, assessment_problems: currentSoap.assessmentProblems, assessment_ddx: currentSoap.assessmentDdx, plan_tx: currentSoap.planTx, plan_rx: currentSoap.planRx, plan_summary: currentSoap.planSummary };
+      
+      const { data, error } = currentSoap.id 
+        ? await supabase.from('soap_records').update(payload).eq('id', currentSoap.id).select() 
+        : await supabase.from('soap_records').insert([payload]).select();
+
+      if (!error && data) {
+        const savedSoap = data[0];
+        onUpdateSoap({ 
+          ...currentSoap, 
+          id: savedSoap.id,
+          assessmentProblems: savedSoap.assessment_problems,
+          assessmentDdx: savedSoap.assessment_ddx,
+          planTx: savedSoap.plan_tx,
+          planRx: savedSoap.plan_rx,
+          planSummary: savedSoap.plan_summary
+        });
+        if (onActiveSoapChange) onActiveSoapChange(savedSoap.cc || 'Record Saved');
+        fetchHistory();
+      } else if (error) {
+        alert('진료 기록 저장 중 오류가 발생했습니다: ' + error.message);
+      }
+    } finally { setIsSaving(false); }
+  };
+
+  const handleDeleteImage = async (soapId: string, urlToDelete: string) => {
+    if (!window.confirm('이미지를 삭제하시겠습니까? (연동된 오더 원본에서 삭제됩니다)')) return;
+    const soapEntry = history.find(h => h.id === soapId);
+    if (!soapEntry || !soapEntry.order_id) return;
+    const { data: orderData } = await supabase.from('department_orders').select('images').eq('id', soapEntry.order_id).single();
+    if (!orderData) return;
+    const newOrderImages = (orderData.images || []).filter((img: any) => { const url = typeof img === 'string' ? img : img.url; return url !== urlToDelete; });
+    await supabase.from('department_orders').update({ images: newOrderImages }).eq('id', soapEntry.order_id);
+    fetchHistory();
+    if (currentSoap.id === soapId) { onUpdateSoap({ ...currentSoap, images: newOrderImages.map((i: any) => typeof i === 'string' ? i : i.url) }); }
+  };
+
+  const handleAILoad = async (type: 'test' | 'ddx' | 'tx' | 'rx' | 'summary') => {
+    if (!activePatient) return;
+    setAiModal(prev => ({ ...prev, isOpen: true, isLoading: true }));
+    let res: any = null;
+    let title = '', icon = '', field: keyof SOAPRecord = 'subjective';
+    if (type === 'test') { res = await getDiagnosticSuggestions(activePatient, currentSoap); title = 'AI Diagnostic Tests'; icon = 'fa-microscope'; field = 'objective'; }
+    else if (type === 'ddx') { res = await getDifferentialDiagnoses(activePatient, currentSoap); title = 'AI Differential Diagnosis'; icon = 'fa-brain'; field = 'assessmentProblems'; }
+    else if (type === 'tx') { res = await getTxSuggestions(activePatient, currentSoap); title = 'AI Treatment Plan'; icon = 'fa-hand-holding-medical'; field = 'planTx'; }
+    else if (type === 'rx') { res = await getRxSuggestions(activePatient, currentSoap); title = 'AI Medication Plan'; icon = 'fa-pills'; field = 'planRx'; }
+    else if (type === 'summary') { res = await getSummarySuggestions(activePatient, currentSoap); title = 'AI Discharge Summary'; icon = 'fa-file-medical-alt'; field = 'planSummary'; }
+    const options = res ? (res.suggestions || res.diagnoses || [res]).map((x: any, i: number) => ({ id: String(i), title: x.testName || x.name || x.txName || x.medName || 'Summary Result', subtitle: x.reason || x.details || x.caution || Object.values(res).join('\n'), extra: x.priority || x.confidence || '', fullContent: `[${x.testName || x.name || x.txName || x.medName || ''}] ${x.reason || x.details || x.caution || ''}` })) : [];
+    setAiModal({ isOpen: true, title, icon, field, options, isLoading: false });
+  };
+
+  const applyAI = (contents: string[]) => {
+    const field = aiModal.field;
+    const current = (currentSoap as any)[field] || '';
+    handleUpdateSoapField(field, current + (current ? '\n' : '') + contents.join('\n'));
+  };
+
+  const loadHistoryToEditor = (entry: SOAPRecord) => {
+    onUpdateSoap(entry);
+    setActiveStep('S');
+    if (onActiveSoapChange) onActiveSoapChange(entry.cc || 'Existing Record');
+  };
+
+  const handleOpenOrder = () => {
+    if (!currentSoap.id) {
+      alert('⚠️ 진료 기록이 아직 저장되지 않았습니다.\n\n모든 오더(검사/처치)는 특정 진료 기록과 연결되어야 합니다. 하단의 [Finish & Save Chart] 버튼을 눌러 기록을 먼저 저장해 주세요.');
+      return;
+    }
+    setIsOrderModalOpen(true);
   };
 
   return (
-    <div className="flex h-full bg-slate-100 overflow-hidden">
+    <div className="flex h-full bg-slate-100 overflow-hidden font-sans">
       <PatientSidebar 
-        width={sidebarWidth}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchResults={searchResults}
-        selectedPatientId={props.selectedPatientId}
-        onSelectPatient={props.onSelectPatient}
-        waitlist={props.waitlist}
-        vets={props.vets}
-        waitlistByVet={waitlistByVet}
-        collapsedVets={collapsedVets}
-        onToggleVet={(id) => setCollapsedVets(prev => ({...prev, [id]: !prev[id]}))}
-        onRemoveFromWaitlist={props.onRemoveFromWaitlist}
-        onDragStart={handleDragStart}
-        onDragEnd={() => {}}
-        onDrop={handleDrop}
-        onStartResizing={() => setIsResizing(true)}
-        dragOverId={dragOverId}
-        setDragOverId={setDragOverId}
+        width={sidebarWidth} searchTerm={searchTerm} onSearchChange={setSearchTerm} searchResults={searchResults}
+        selectedPatientId={activePatient?.id || ''} onSelectPatient={onSelectPatient} waitlist={waitlist} vets={vets}
+        waitlistByVet={waitlistByVet} collapsedVets={collapsedVets} onToggleVet={(id) => setCollapsedVets(prev => ({ ...prev, [id]: !prev[id] }))}
+        onRemoveFromWaitlist={onRemoveFromWaitlist} onDragStart={(e, id, type) => { 
+          setDraggedItemId(id); 
+          setDraggedItemType(type);
+          e.dataTransfer.setData('text/plain', id);
+        }}
+        onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); setDragOverId(null); }}
+        onDrop={async (e, targetVetId) => {
+          setDragOverId(null);
+          if (!draggedItemId) return;
+          if (draggedItemType === 'waitlist') {
+            await onUpdateWaitlist(draggedItemId, { vetId: targetVetId });
+          } else if (draggedItemType === 'patient') {
+            const p = patients.find(pat => pat.id === draggedItemId);
+            if (p) {
+              await onAddToWaitlist({ 
+                patientId: p.id, 
+                patientName: p.name, 
+                breed: p.breed, 
+                ownerName: p.owner, 
+                vetId: targetVetId, 
+                type: 'Consultation' 
+              });
+            }
+          }
+        }}
+        onStartResizing={() => setIsResizingSidebar(true)} dragOverId={dragOverId} setDragOverId={setDragOverId}
       />
-
-      <main className="flex-1 flex flex-col overflow-hidden relative min-w-0 bg-white">
-        {activePatient ? (
-          <>
-            <PatientHeader 
-              patient={activePatient} 
-              activeSoapId={props.currentSoap?.id}
-              onOpenOrder={() => setIsOrderModalOpen(true)} 
-            />
-            <div className="flex-1 flex overflow-hidden">
-              <div className="flex-1 flex flex-col min-w-0">
-                <SOAPEditor 
-                  activeStep={props.soapStep} 
-                  onStepChange={props.setSoapStep} 
-                  record={props.currentSoap} 
-                  onUpdate={props.onUpdateSoap} 
-                  isSaving={props.isSavingSoap} 
-                  onSave={props.onSaveSoap} 
-                  onSuggestTests={props.onSuggestTests} 
-                  onSuggestDdx={props.onSuggestDdx} 
-                  onSuggestTx={props.onSuggestTx} 
-                  onSuggestRx={props.onSuggestRx} 
-                  onSuggestSummary={props.onSuggestSummary} 
-                  onImageDoubleClick={props.setViewingImage}
-                  clinicSettings={props.clinicSettings}
-                />
-              </div>
-
-              <div className={`${isHistoryExpanded ? 'w-[350px]' : 'w-10'} bg-white border-l border-slate-200 flex flex-col transition-all duration-300 shadow-xl z-20`}>
-                {isHistoryExpanded ? (
-                  <>
-                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                      <div><h3 className="font-black text-slate-800 text-sm uppercase tracking-tight">History Ledger</h3></div>
-                      <div className="flex gap-2">
-                        <button onClick={() => props.onNewChart(props.selectedPatientId)} className="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition-all"><i className="fas fa-plus text-xs"></i></button>
-                        <button onClick={() => setIsHistoryExpanded(false)} className="w-8 h-8 text-slate-400 hover:bg-slate-100 rounded-lg flex items-center justify-center"><i className="fas fa-chevron-right text-xs"></i></button>
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-                      {props.history.length === 0 ? (
-                        <div className="text-slate-400 text-center py-20 font-black uppercase tracking-widest text-[9px]">No records found</div>
-                      ) : (
-                        props.history.map(entry => (
-                          <HistoryCard 
-                            key={entry.id} 
-                            entry={entry} 
-                            isExpanded={expandedHistoryId === entry.id} 
-                            onToggle={() => setExpandedHistoryId(expandedHistoryId === entry.id ? null : entry.id)} 
-                            onLoadRecord={props.onLoadHistory} 
-                            onImageDoubleClick={props.setViewingImage}
-                            onDeleteImage={handleDeleteHistoryImage}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex flex-col h-full items-center py-6 gap-6 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setIsHistoryExpanded(true)}>
-                    <i className="fas fa-chevron-left text-slate-300"></i>
-                    <div className="writing-mode-vertical-rl text-[10px] font-black text-slate-400 uppercase tracking-widest" style={{ writingMode: 'vertical-rl' }}>History</div>
-                  </div>
-                )}
-              </div>
+      <div className="flex-1 flex flex-col min-w-0 bg-white shadow-inner border-r border-slate-300">
+        <div className="h-12 border-b border-slate-200 bg-white px-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-sm">
+              {(['S', 'O', 'A', 'P'] as const).map(step => (
+                <button 
+                  key={step} 
+                  onClick={() => setActiveStep(step)} 
+                  className={`px-6 py-1 text-[11px] font-black uppercase tracking-wider rounded-md transition-all ${activeStep === step ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {step}
+                </button>
+              ))}
             </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-            <i className="fas fa-user-md text-6xl mb-4 opacity-20"></i>
-            <p className="font-black uppercase tracking-[0.2em]">Select a patient to start consultation</p>
+            <div className="h-4 w-px bg-slate-300"></div>
+            <button 
+              onClick={() => setIsPacsOpen(true)} 
+              className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+            >
+              <i className="fas fa-x-ray mr-2"></i> Open PACS
+            </button>
+            <button 
+              onClick={handleOpenOrder} 
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${
+                !currentSoap.id 
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed grayscale' 
+                  : 'bg-slate-800 text-white hover:bg-black'
+              }`}
+            >
+              <i className="fas fa-paper-plane text-[9px]"></i> 
+              Send Order
+              {!currentSoap.id && <i className="fas fa-lock text-[8px] opacity-60"></i>}
+            </button>
           </div>
-        )}
-      </main>
-
-      {isOrderModalOpen && activePatient && (
+          <div className="flex items-center gap-2">
+            {!currentSoap.id && <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2 py-1 rounded uppercase tracking-tighter animate-pulse border border-rose-100">Save required for orders</span>}
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Live Reference: Order DB</span>
+          </div>
+        </div>
+        <div className="flex-1 relative overflow-hidden">
+          {!activePatient ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-300">
+              <i className="fas fa-user-md text-4xl mb-4 opacity-50"></i>
+              <p className="font-black uppercase tracking-[0.2em] text-xs">Select a patient to start charting</p>
+            </div>
+          ) : (
+            <SOAPEditor 
+              activeStep={activeStep} 
+              onStepChange={setActiveStep} 
+              record={currentSoap} 
+              onUpdate={handleUpdateSoapField as any} 
+              isSaving={isSaving} 
+              onSave={handleSaveSoap} 
+              onImageDoubleClick={onImageDoubleClick} 
+              clinicSettings={clinicSettings} 
+              onDeleteImage={handleDeleteImage} 
+              onSuggestTests={() => handleAILoad('test')} 
+              onSuggestDdx={() => handleAILoad('ddx')} 
+              onSuggestTx={() => handleAILoad('tx')} 
+              onSuggestRx={() => handleAILoad('rx')} 
+              onSuggestSummary={() => handleAILoad('summary')} 
+            />
+          )}
+        </div>
+      </div>
+      <div className="w-80 border-l border-slate-200 bg-slate-50 flex flex-col flex-shrink-0">
+        <div className="p-4 border-b border-slate-200 bg-white shadow-sm flex items-center justify-between">
+          <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+            <i className="fas fa-history text-blue-500"></i> Clinical History
+          </h3>
+          <span className="bg-slate-100 text-slate-400 text-[9px] font-black px-1.5 py-0.5 rounded">{history.length}</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+          {!activePatient ? (
+            <div className="h-full flex items-center justify-center text-slate-300">
+              <p className="font-black uppercase tracking-widest text-[9px]">No Patient Selected</p>
+            </div>
+          ) : history.length === 0 ? (
+            <div className="py-20 text-center opacity-20">
+              <i className="fas fa-folder-open text-4xl mb-3"></i>
+              <p className="text-[10px] font-black uppercase">No History Found</p>
+            </div>
+          ) : (
+            history.map(entry => (
+              <HistoryCard 
+                key={entry.id} 
+                entry={entry} 
+                isExpanded={expandedHistoryId === entry.id} 
+                onToggle={() => setExpandedHistoryId(expandedHistoryId === entry.id ? null : entry.id)} 
+                onLoadRecord={loadHistoryToEditor} 
+                onImageDoubleClick={onImageDoubleClick} 
+                onDeleteImage={handleDeleteImage} 
+              />
+            ))
+          )}
+        </div>
+      </div>
+      {isOrderModalOpen && (
         <OrderModal 
-          isOpen={isOrderModalOpen}
-          onClose={() => setIsOrderModalOpen(false)}
-          onSave={handleSaveOrder}
-          vets={props.vets}
-          isSubmitting={isSubmittingOrder}
-          activeSoapId={props.currentSoap?.id}
-          draftOrder={{ patient_id: activePatient.id, patient_name: activePatient.name }}
+          isOpen={isOrderModalOpen} 
+          onClose={() => setIsOrderModalOpen(false)} 
+          vets={vets} 
+          clinicSettings={clinicSettings} 
+          activeSoapId={currentSoap.id} 
+          draftOrder={{ patient_id: activePatient?.id, patient_name: activePatient?.name }} 
+          isSubmitting={false} 
+          onSave={async (vName, det, items, vId, sId, dept, imgs, status) => { 
+            const soapId = sId || currentSoap.id;
+            if (!soapId) {
+              alert('SOAP ID가 유실되었습니다. 다시 시도해 주세요.');
+              return;
+            }
+            const { data: newOrder } = await supabase.from('department_orders').insert([{ 
+              patient_id: activePatient?.id, 
+              patient_name: activePatient?.name, 
+              soap_id: soapId, 
+              department: dept, 
+              vet_name: vName, 
+              request_details: det, 
+              status, 
+              items, 
+              images: imgs 
+            }]).select().single(); 
+            
+            if (soapId && newOrder) { 
+              await supabase.from('soap_records').update({ order_id: newOrder.id }).eq('id', soapId); 
+              fetchHistory(); 
+            } 
+            setIsOrderModalOpen(false); 
+          }} 
         />
       )}
-
-      {isResizing && (
-        <div 
-          className="fixed inset-0 z-[100] cursor-col-resize"
-          onMouseMove={(e) => {
-            const newWidth = e.clientX;
-            if (newWidth >= 200 && newWidth <= 500) setSidebarWidth(newWidth);
-          }}
-          onMouseUp={() => setIsResizing(false)}
-        />
-      )}
+      {isPacsOpen && activePatient && (<PacsViewer chartNumber={activePatient.chartNumber || ''} patientName={activePatient.name} onClose={() => setIsPacsOpen(false)} />)}
+      {aiModal.isOpen && (<SelectionModal isOpen={aiModal.isOpen} onClose={() => setAiModal(prev => ({ ...prev, isOpen: false }))} title={aiModal.title} icon={aiModal.icon} options={aiModal.options} isLoading={aiModal.isLoading} onConfirm={(selected) => applyAI(selected)} />)}
     </div>
   );
 };

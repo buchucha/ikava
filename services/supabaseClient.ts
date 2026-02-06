@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 
 // 수의사님이 제공해주신 Supabase 연결 정보
 const supabaseUrl = 'https://obnddbarhbkrlfaojedg.supabase.co';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ibmRkYmFyaGJrcmxmYW9qZWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODQ1NzI3OSwiZXhwIjoyMDg0MDMzMjc5fQ.L8fUCJvnuHo1u-mdyIQFB73gClr0A-6k-3mh5Q8tJUo';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ibmRkYmFyaGJrcmxmYW9qZWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg0NTcyNzksImV4cCI6MjA4NDAzMzI3OX0.209m4hDKb89nDf84LwRWiTGibj1Z11wPX7we4umc-ZU';
 
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
  * 실시간 변경 사항 구독 (접수/대기 리스트 등)

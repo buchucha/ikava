@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Patient, BillingItem, Veterinarian, WaitlistEntry, ServiceCatalogItem, ServiceCategory } from '../types';
 import { supabase } from '../services/supabaseClient';
+import { PatientSidebar } from './PatientSidebar';
 
 interface BillingPageProps {
   patients: Patient[];
@@ -56,14 +57,59 @@ export const BillingPage: React.FC<BillingPageProps> = ({ patients, vets, waitli
   };
 
   const selectedPatient = useMemo(() => patients.find(p => p.id === selectedPatientId), [selectedPatientId, patients]);
-  const searchResults = useMemo(() => { const query = searchTerm.trim().toLowerCase(); return query ? patients.filter(p => p.name.toLowerCase().includes(query) || p.owner.toLowerCase().includes(query) || p.phone.includes(query)) : []; }, [searchTerm, patients]);
-  const waitlistByVet = useMemo(() => { const groups: Record<string, WaitlistEntry[]> = { 'unassigned': [] }; vets.forEach(v => groups[v.id] = []); waitlist.forEach(w => { const vid = w.vetId; if (vid && groups[vid]) groups[vid].push(w); else groups['unassigned'].push(w); }); return groups; }, [waitlist, vets]);
+  
+  const searchResults = useMemo(() => { 
+    const query = searchTerm.trim().toLowerCase(); 
+    return query ? patients.filter(p => p.name.toLowerCase().includes(query) || p.owner.toLowerCase().includes(query) || p.phone.includes(query) || (p.chartNumber || '').toLowerCase().includes(query)) : []; 
+  }, [searchTerm, patients]);
+
+  const waitlistByVet = useMemo(() => { 
+    const groups: Record<string, WaitlistEntry[]> = { 'unassigned': [] }; 
+    vets.forEach(v => groups[v.id] = []); 
+    waitlist.forEach(w => { 
+      const vid = w.vetId; 
+      if (vid && groups[vid]) groups[vid].push(w); 
+      else groups['unassigned'].push(w); 
+    }); 
+    return groups; 
+  }, [waitlist, vets]);
+
   const subTotal = useMemo(() => items.reduce((acc, cur) => acc + cur.total_price, 0), [items]);
   const currentPaid = methods.card + methods.cash + methods.transfer;
   const remainingBalance = subTotal - currentPaid;
 
-  const handleDragStart = (e: React.DragEvent, id: string, type: 'patient' | 'waitlist') => { setDraggedItemId(id); setDraggedItemType(type); e.dataTransfer.effectAllowed = 'move'; };
-  const handleDropSidebar = async (e: React.DragEvent, targetVetId: string) => { e.preventDefault(); if (!draggedItemId || !draggedItemType) return; if (draggedItemType === 'waitlist') { const entry = waitlist.find(w => w.id === draggedItemId); if (entry && entry.vetId !== targetVetId) await onUpdateWaitlist(draggedItemId, { vetId: targetVetId === 'unassigned' ? '' : targetVetId }); } else if (draggedItemType === 'patient') { const p = patients.find(pat => pat.id === draggedItemId); if (p) await onAddToWaitlist({ patientId: p.id, patientName: p.name, breed: p.breed, ownerName: p.owner, vetId: targetVetId === 'unassigned' ? '' : targetVetId, memo: '', type: 'Billing Queue' }); } setDragOverId(null); };
+  const handleDragStart = (e: React.DragEvent, id: string, type: 'patient' | 'waitlist') => { 
+    setDraggedItemId(id); 
+    setDraggedItemType(type); 
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move'; 
+  };
+
+  const handleDropSidebar = async (e: React.DragEvent, targetVetId: string) => { 
+    e.preventDefault(); 
+    setDragOverId(null);
+    if (!draggedItemId || !draggedItemType) return; 
+
+    if (draggedItemType === 'waitlist') { 
+      const entry = waitlist.find(w => w.id === draggedItemId); 
+      if (entry && entry.vetId !== targetVetId) {
+        await onUpdateWaitlist(draggedItemId, { vetId: targetVetId }); 
+      }
+    } else if (draggedItemType === 'patient') { 
+      const p = patients.find(pat => pat.id === draggedItemId); 
+      if (p) {
+        await onAddToWaitlist({ 
+          patientId: p.id, 
+          patientName: p.name, 
+          breed: p.breed, 
+          ownerName: p.owner, 
+          vetId: targetVetId, 
+          memo: '', 
+          type: 'Billing Queue' 
+        }); 
+      }
+    } 
+  };
 
   const handleAddItemFromCatalog = async (catalogItem: ServiceCatalogItem) => {
     if (!selectedPatientId) return;
@@ -93,22 +139,47 @@ export const BillingPage: React.FC<BillingPageProps> = ({ patients, vets, waitli
     setSourceIndex(null); setDropTargetIndex(null);
   };
 
+  // Resizing logic consistency
+  const handleResize = useCallback((e: MouseEvent) => {
+    if (isResizing) {
+      const newWidth = e.clientX;
+      if (newWidth >= 250 && newWidth <= 600) setSidebarWidth(newWidth);
+    }
+  }, [isResizing]);
+
+  const stopResizing = useCallback(() => setIsResizing(false), []);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', handleResize);
+    window.addEventListener('mouseup', stopResizing);
+    return () => {
+      window.removeEventListener('mousemove', handleResize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [handleResize, stopResizing]);
+
   return (
     <div className={`flex h-full bg-slate-100 overflow-hidden text-xs font-sans ${isResizing ? 'cursor-col-resize select-none' : ''}`}>
-      <div style={{ width: `${sidebarWidth}px` }} className="relative border-r border-slate-300 flex flex-col bg-white z-10 flex-shrink-0 shadow-sm">
-        <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between"><h2 className="font-bold text-gray-800">Patient Search</h2></div>
-        <div className="p-2 border-b border-slate-200"><div className="relative"><input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded text-[11px] outline-none" /><i className="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"></i></div></div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-1">
-          {searchResults.map(p => (<div key={p.id} draggable onDragStart={(e) => handleDragStart(e, p.id, 'patient')} onDoubleClick={() => onSelectPatient(p.id)} className={`px-2 py-1.5 cursor-pointer border-b border-slate-100 flex items-center gap-2 hover:bg-blue-50 transition-colors ${selectedPatientId === p.id ? 'bg-blue-50' : ''}`}><img src={p.avatar} className="w-8 h-8 rounded border border-slate-200" alt="" /><div className="flex-1 min-w-0"><span className="font-black text-gray-900 truncate">{p.name}</span></div></div>))}
-          {vets.map(vet => (
-            <div key={vet.id} className="mb-1">
-              <div onClick={() => setCollapsedVets(p => ({ ...p, [vet.id]: !p[vet.id] }))} className="px-2 py-1 bg-slate-50 border border-slate-200 flex justify-between items-center cursor-pointer"><span className="font-black text-gray-700">{vet.name}</span><span className="text-[10px] text-blue-600">{waitlistByVet[vet.id]?.length || 0}</span></div>
-              {!collapsedVets[vet.id] && waitlistByVet[vet.id].map(w => <div key={w.id} draggable onDragStart={(e) => handleDragStart(e, w.id, 'waitlist')} onDoubleClick={() => onSelectPatient(w.patientId)} className="px-2 py-1.5 border-b border-slate-100 flex justify-between items-center hover:bg-slate-50 group cursor-pointer"><span className="font-black text-gray-900 truncate">{w.patientName}</span><button onClick={(e) => { e.stopPropagation(); onRemoveFromWaitlist(w.id); }} className="text-gray-300 hover:text-rose-500"><i className="fas fa-times"></i></button></div>)}
-            </div>
-          ))}
-        </div>
-        <div onMouseDown={() => setIsResizing(true)} className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 z-20"></div>
-      </div>
+      <PatientSidebar 
+        width={sidebarWidth}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchResults={searchResults}
+        selectedPatientId={selectedPatientId}
+        onSelectPatient={onSelectPatient}
+        waitlist={waitlist}
+        vets={vets}
+        waitlistByVet={waitlistByVet}
+        collapsedVets={collapsedVets}
+        onToggleVet={(id) => setCollapsedVets(prev => ({ ...prev, [id]: !prev[id] }))}
+        onRemoveFromWaitlist={onRemoveFromWaitlist}
+        onDragStart={handleDragStart}
+        onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); setDragOverId(null); }}
+        onDrop={handleDropSidebar}
+        onStartResizing={() => setIsResizing(true)}
+        dragOverId={dragOverId}
+        setDragOverId={setDragOverId}
+      />
 
       <div className="w-[450px] border-r border-slate-300 flex flex-col bg-slate-50">
         <div className="p-3 bg-slate-50 border-b border-slate-200 sticky top-0 z-10">

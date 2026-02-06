@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SOAPField, SOAPRecord, LabResults, DiagnosisReference, ClinicSettings } from '../types';
 import { supabase } from '../services/supabaseClient';
+import { uploadImage } from '../services/imageService';
 
 const SectionHeader: React.FC<{ 
   icon: string; 
@@ -44,11 +45,12 @@ interface SOAPEditorProps {
   onSuggestRx: () => void;
   onSuggestSummary: () => void;
   onImageDoubleClick: (src: string) => void;
+  onDeleteImage?: (soapId: string, url: string) => void; 
   clinicSettings?: ClinicSettings;
 }
 
 export const SOAPEditor: React.FC<SOAPEditorProps> = ({ 
-  activeStep, onStepChange, record, onUpdate, onSuggestTests, onSuggestDdx, onSuggestTx, onSuggestRx, onSuggestSummary, isSaving, onSave, onImageDoubleClick, clinicSettings
+  activeStep, onStepChange, record, onUpdate, onSuggestTests, onSuggestDdx, onSuggestTx, onSuggestRx, onSuggestSummary, isSaving, onSave, onImageDoubleClick, onDeleteImage, clinicSettings
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const steps = ['S', 'O', 'A', 'P'] as const;
@@ -91,14 +93,27 @@ export const SOAPEditor: React.FC<SOAPEditorProps> = ({
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => onUpdate('images', [...(record.images || []), reader.result as string]);
-    reader.readAsDataURL(file);
+    setIsUploading(true);
+    try {
+      const url = await uploadImage(file, clinicSettings?.imageServerUrl);
+      if (url) {
+        onUpdate('images', [...(record.images || []), url]);
+      }
+    } catch (err) {
+      console.error("SOAP Image upload failed:", err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const removeImage = (url: string) => {
-    const newImages = (record.images || []).filter(img => img !== url);
-    onUpdate('images', newImages);
+    if (record.id && onDeleteImage) {
+      onDeleteImage(record.id, url);
+    } else {
+      const newImages = (record.images || []).filter(img => img !== url);
+      onUpdate('images', newImages);
+    }
   };
 
   const renderSubjective = () => (
@@ -115,10 +130,14 @@ export const SOAPEditor: React.FC<SOAPEditorProps> = ({
   const renderObjective = () => (
     <div className="space-y-4">
       <SectionHeader icon="fa-heartbeat" title="Objective (Clinical Exam)" colorClass="bg-emerald-600" onQuickSave={onSave} isSaving={isSaving} />
-      <div className="flex gap-2 mb-2">
-          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-3 py-1.5 bg-slate-100 border border-slate-300 rounded text-[11px] font-bold hover:bg-slate-200 disabled:opacity-50"><i className="fas fa-camera mr-1"></i> Attach Photo</button>
+      <div className="flex gap-2 mb-2 items-center">
+          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-3 py-1.5 bg-slate-100 border border-slate-300 rounded text-[11px] font-bold hover:bg-slate-200 disabled:opacity-50">
+            <i className={`fas ${isUploading ? 'fa-spinner fa-spin' : 'fa-camera'} mr-1`}></i> 
+            {isUploading ? 'Uploading...' : 'Attach Photo'}
+          </button>
           <button onClick={onSuggestTests} className="px-3 py-1.5 bg-slate-800 text-white rounded text-[11px] font-bold hover:bg-black"><i className="fas fa-microscope mr-1"></i> AI Diagnostics</button>
           <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleFileUpload} />
+          {isUploading && <span className="text-[9px] font-black text-blue-500 uppercase animate-pulse">Processing media...</span>}
       </div>
       <textarea value={record.objective || ''} onChange={(e) => onUpdate('objective', e.target.value)} placeholder="Vitals, physical exam findings..." className="w-full min-h-[500px] p-4 text-sm font-bold text-slate-950 bg-white rounded border border-slate-400 outline-none focus:border-emerald-600 shadow-sm" />
     </div>
