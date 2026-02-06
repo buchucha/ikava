@@ -45,6 +45,7 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
   const [draggedItemType, setDraggedItemType] = useState<'patient' | 'waitlist' | 'order' | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [isDropZoneOver, setIsDropZoneOver] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -227,7 +228,6 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
 
                 <div className="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-3">
                   {deptOrders.map(order => {
-                    // NAS(Tailscale) 동기화 주소 판별 (프로토콜 유연하게 대응)
                     const tailscaleImgs = order.images?.filter((img: any) => {
                       const src = typeof img === 'string' ? img : img.url;
                       return src?.includes('ikava.tailbce91b.ts.net');
@@ -246,7 +246,7 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
                         }}
                         onDragEnd={() => {
                           setDraggedItemId(null);
-                          setDraggedItemType(null); // Fixed typo from 'order' to null
+                          setDraggedItemType(null);
                           setIsDropZoneOver(false);
                         }}
                         onClick={(e) => { e.stopPropagation(); setEditingOrder(order); setPreSelectedDept(null); setIsModalOpen(true); }}
@@ -275,25 +275,32 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
                             {hasTailscale ? (
                               tailscaleImgs.slice(0, 3).map((img: any, i) => {
                                 const src = typeof img === 'string' ? img : img.url;
+                                const isError = imageErrors[src];
+
                                 return (
                                   <div 
                                     key={i} 
                                     onDoubleClick={(e) => {
-                                      e.stopPropagation(); // 카드 상세 클릭 방지
-                                      onImageDoubleClick(src);
+                                      e.stopPropagation();
+                                      if (!isError) onImageDoubleClick(src);
+                                      else window.open(src, '_blank');
                                     }}
-                                    className="w-6 h-6 rounded-md border border-blue-500 ring-1 ring-blue-500/20 overflow-hidden bg-white shadow-sm cursor-zoom-in"
+                                    className={`w-6 h-6 rounded-md border overflow-hidden bg-white shadow-sm flex items-center justify-center ${isError ? 'border-rose-300' : 'border-blue-500 ring-1 ring-blue-500/20 cursor-zoom-in'}`}
                                   >
-                                    <img 
-                                      src={src} 
-                                      referrerPolicy="no-referrer"
-                                      crossOrigin="anonymous"
-                                      className="w-full h-full object-cover" 
-                                      alt="" 
-                                      onError={() => {
-                                        console.error(`이미지 로드 실패 [${src}]`);
-                                      }}
-                                    />
+                                    {!isError ? (
+                                      <img 
+                                        src={src} 
+                                        referrerPolicy="no-referrer"
+                                        className="w-full h-full object-cover" 
+                                        alt="" 
+                                        onError={() => {
+                                          console.warn(`이미지 로드 실패 [NAS 개인망 확인 필요]: ${src}`);
+                                          setImageErrors(prev => ({ ...prev, [src]: true }));
+                                        }}
+                                      />
+                                    ) : (
+                                      <i className="fas fa-exclamation-circle text-[10px] text-rose-400"></i>
+                                    )}
                                   </div>
                                 );
                               })

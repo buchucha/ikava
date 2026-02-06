@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { SOAPRecord } from '../types';
 
 interface HistoryCardProps {
@@ -19,6 +19,8 @@ export const HistoryCard: React.FC<HistoryCardProps> = ({
   onImageDoubleClick,
   onDeleteImage
 }) => {
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+
   return (
     <div className={`mb-3 transition-all duration-300 ${isExpanded ? 'scale-[1.01]' : ''}`}>
       <div 
@@ -64,35 +66,44 @@ export const HistoryCard: React.FC<HistoryCardProps> = ({
               ))}
             </div>
 
-            {/* Media Assets with Delete Button */}
+            {/* Media Assets with Error Handling */}
             {entry.images && entry.images.length > 0 && (
               <div className="space-y-2">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Clinical Media</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {entry.images.map((img, idx) => (
-                    <div 
-                      key={idx} 
-                      className="relative group w-12 h-12 rounded-lg overflow-hidden border border-slate-200 shadow-sm bg-slate-50 cursor-zoom-in hover:border-blue-500 transition-all"
-                    >
-                      <img 
-                        src={img} 
-                        className="w-full h-full object-cover" 
-                        alt={`Clinical ${idx}`} 
-                        onClick={() => onImageDoubleClick(img)}
-                      />
-                      {onDeleteImage && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteImage(entry.id, img);
-                          }}
-                          className="absolute top-0 right-0 w-4 h-4 bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 rounded-bl-lg"
-                        >
-                          <i className="fas fa-trash-alt text-[7px]"></i>
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {entry.images.map((img, idx) => {
+                    const isError = imageErrors[img];
+                    return (
+                      <div 
+                        key={idx} 
+                        className={`relative group w-12 h-12 rounded-lg overflow-hidden border shadow-sm bg-slate-50 flex items-center justify-center transition-all ${isError ? 'border-rose-300' : 'border-slate-200 cursor-zoom-in hover:border-blue-500'}`}
+                      >
+                        {!isError ? (
+                          <img 
+                            src={img} 
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover" 
+                            alt={`Clinical ${idx}`} 
+                            onClick={() => onImageDoubleClick(img)}
+                            onError={() => setImageErrors(prev => ({ ...prev, [img]: true }))}
+                          />
+                        ) : (
+                          <i className="fas fa-exclamation-triangle text-[10px] text-rose-400"></i>
+                        )}
+                        {onDeleteImage && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteImage(entry.id, img);
+                            }}
+                            className="absolute top-0 right-0 w-4 h-4 bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 rounded-bl-lg"
+                          >
+                            <i className="fas fa-trash-alt text-[7px]"></i>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

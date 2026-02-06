@@ -1,5 +1,5 @@
 {
-  "name": "IKAVA MEDICAL CENTER EMR SYSTEM 3.1.2",
+  "name": "IKAVA MEDICAL CENTER EMR SYSTEM 3.1.3",
   "description": "엑스레이 초음파 wl 셋업 및 혈검 ui 고민",
   "requestFramePermissions": [
     "camera"

@@ -33,6 +33,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
   const [selectedDept, setSelectedDept] = useState<DepartmentType>('Treatment');
   const [vetId, setVetId] = useState(''); const [details, setDetails] = useState(''); const [selectedItems, setSelectedItems] = useState<BillingItem[]>([]); const [orderImages, setOrderImages] = useState<OrderImage[]>([]); const [isUploading, setIsUploading] = useState(false); const [searchTerm, setSearchTerm] = useState(''); const [catalog, setCatalog] = useState<ServiceCatalogItem[]>([]); const [calculatingItem, setCalculatingItem] = useState<ServiceCatalogItem | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isCompleted = editingOrder?.status === 'Completed';
@@ -40,9 +41,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
   useEffect(() => {
     if (isOpen) {
       setConfirmDelete(false); 
+      setImageErrors({});
       const fetchCatalog = async () => { const { data } = await supabase.from('service_catalog').select('*').eq('is_active', true).order('name'); if (data) setCatalog(data); }; fetchCatalog();
       if (editingOrder) { 
-        setVetId(vets.find(v => v.id === editingOrder.vet_name)?.id || vets[0]?.id || ''); 
+        setVetId(vets.find(v => v.name === editingOrder.vet_name)?.id || vets[0]?.id || ''); 
         setDetails(editingOrder.request_details); 
         setSelectedItems(editingOrder.items || []); 
         setSelectedDept(editingOrder.department); 
@@ -100,9 +102,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
     );
   };
 
-  /**
-   * NAS 도메인을 포함하는 URL을 우선으로 정렬
-   */
   const sortedOrderImages = useMemo(() => {
     return [...orderImages].sort((a, b) => {
       const isTailA = a.url?.includes('ikava.tailbce91b.ts.net');
@@ -119,7 +118,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl w-full max-w-4xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <h3 className="font-black text-slate-900 text-base uppercase tracking-tight">Department Order Entry</h3>
@@ -140,7 +139,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
           </div>
         </div>
         
-        {/* Department Tabs */}
         <div className="bg-white border-b border-slate-100 p-1.5 flex gap-1">
           {DEPARTMENTS.map(dept => (
             <button 
@@ -160,7 +158,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-           {/* Left: Catalog */}
            <div className={`w-1/3 p-5 border-r border-slate-100 flex flex-col bg-slate-50/50`}>
              <div className="relative mb-3">
                <input 
@@ -199,7 +196,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
              </div>
            </div>
 
-           {/* Middle: Order Details */}
            <div className="w-1/3 p-5 flex flex-col space-y-4 border-r border-slate-100 overflow-y-auto">
               <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 flex items-center justify-between">
                 <span className="text-sm font-black text-slate-900 truncate block">{displayPatientName}</span>
@@ -259,7 +255,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
               </div>
            </div>
 
-           {/* Right: Media Assets */}
            <div className="w-1/3 p-5 flex flex-col bg-slate-50/30">
               <div className="flex justify-between items-center mb-3">
                 <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Clinical Media</h4>
@@ -275,17 +270,24 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
               <div className={`flex-1 overflow-y-auto custom-scrollbar border-2 border-dashed rounded-2xl p-3 bg-white shadow-inner border-slate-200`}>
                 {sortedOrderImages.map((img, idx) => {
                   const isTailscale = img.url?.includes('ikava.tailbce91b.ts.net');
+                  const isError = imageErrors[img.url];
+
                   return (
-                    <div key={idx} className={`relative group bg-white border rounded-xl overflow-hidden mb-3 shadow-sm hover:shadow-md transition-all ${isTailscale ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-blue-500/10 cursor-zoom-in' : 'border-slate-200 opacity-60'}`}>
-                      {isTailscale ? (
+                    <div key={idx} className={`relative group bg-white border rounded-xl overflow-hidden mb-3 shadow-sm hover:shadow-md transition-all ${isError ? 'border-rose-300' : isTailscale ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-blue-500/10 cursor-zoom-in' : 'border-slate-200 opacity-60'}`}>
+                      {isError ? (
+                        <div className="w-full aspect-square flex flex-col items-center justify-center bg-rose-50 text-rose-400 gap-2 p-4 text-center">
+                          <i className="fas fa-exclamation-triangle text-lg"></i>
+                          <p className="text-[8px] font-black uppercase leading-tight">Failed to load from NAS</p>
+                          <a href={img.url} target="_blank" rel="noreferrer" className="text-[8px] text-blue-500 underline font-black">Open Link Directly</a>
+                        </div>
+                      ) : isTailscale ? (
                         <img 
                           src={img.url} 
                           referrerPolicy="no-referrer"
-                          crossOrigin="anonymous"
                           className="w-full aspect-square object-cover" 
                           alt="" 
                           onError={() => {
-                            console.error(`이미지 로드 실패 [${img.url}]`);
+                            setImageErrors(prev => ({ ...prev, [img.url]: true }));
                           }}
                         />
                       ) : (
@@ -301,7 +303,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
                       
                       <div className="absolute bottom-0 left-0 right-0 bg-black/40 backdrop-blur-sm px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <span className="text-[8px] text-white font-bold uppercase truncate block">{img.name}</span>
-                        {isTailscale && <span className="text-[7px] text-blue-300 font-black uppercase tracking-widest leading-none mt-1 block">NAS Synced</span>}
+                        {isTailscale && !isError && <span className="text-[7px] text-blue-300 font-black uppercase tracking-widest leading-none mt-1 block">NAS Synced</span>}
                       </div>
                     </div>
                   );
@@ -316,7 +318,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onSave,
            </div>
         </div>
 
-        {/* Footer Actions */}
         <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 items-center">
           {(!activeSoapId && !editingOrder?.soap_id) && (
             <span className="text-[10px] font-black text-rose-500 uppercase tracking-tight italic mr-auto">
