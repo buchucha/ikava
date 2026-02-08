@@ -31,7 +31,7 @@ const CatalogItemRow: React.FC<{ item: ServiceCatalogItem; onAdd: (item: Service
 export const BillingPage: React.FC<BillingPageProps> = ({ patients, vets, waitlist, onAddToWaitlist, onUpdateWaitlist, onRemoveFromWaitlist, selectedPatientId, onSelectPatient }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [catalogSearch, setCatalogSearch] = useState('');
-  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [draggedItemType, setDraggedItemType] = useState<'patient' | 'waitlist' | 'billing_item' | null>(null);
@@ -81,22 +81,26 @@ export const BillingPage: React.FC<BillingPageProps> = ({ patients, vets, waitli
   const handleDragStart = (e: React.DragEvent, id: string, type: 'patient' | 'waitlist') => { 
     setDraggedItemId(id); 
     setDraggedItemType(type); 
-    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.setData('drag-id', id);
+    e.dataTransfer.setData('drag-type', type);
     e.dataTransfer.effectAllowed = 'move'; 
   };
 
   const handleDropSidebar = async (e: React.DragEvent, targetVetId: string) => { 
     e.preventDefault(); 
     setDragOverId(null);
-    if (!draggedItemId || !draggedItemType) return; 
+    const dragId = e.dataTransfer.getData('drag-id') || draggedItemId;
+    const dragType = e.dataTransfer.getData('drag-type') || draggedItemType;
 
-    if (draggedItemType === 'waitlist') { 
-      const entry = waitlist.find(w => w.id === draggedItemId); 
+    if (!dragId || !dragType) return; 
+
+    if (dragType === 'waitlist') { 
+      const entry = waitlist.find(w => w.id === dragId); 
       if (entry && entry.vetId !== targetVetId) {
-        await onUpdateWaitlist(draggedItemId, { vetId: targetVetId }); 
+        await onUpdateWaitlist(dragId, { vetId: targetVetId }); 
       }
-    } else if (draggedItemType === 'patient') { 
-      const p = patients.find(pat => pat.id === draggedItemId); 
+    } else if (dragType === 'patient') { 
+      const p = patients.find(pat => pat.id === dragId); 
       if (p) {
         await onAddToWaitlist({ 
           patientId: p.id, 
@@ -139,11 +143,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({ patients, vets, waitli
     setSourceIndex(null); setDropTargetIndex(null);
   };
 
-  // Resizing logic consistency
   const handleResize = useCallback((e: MouseEvent) => {
     if (isResizing) {
       const newWidth = e.clientX;
-      if (newWidth >= 250 && newWidth <= 600) setSidebarWidth(newWidth);
+      if (newWidth >= 200 && newWidth <= 450) setSidebarWidth(newWidth);
     }
   }, [isResizing]);
 

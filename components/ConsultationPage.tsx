@@ -58,7 +58,6 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [draggedItemType, setDraggedItemType] = useState<'patient' | 'waitlist' | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  // 상단에서 X를 눌러 activeSoapCc가 null이 되면 에디터도 초기화
   useEffect(() => {
     if (activeSoapCc === null && currentSoap.id) {
       onUpdateSoap({ subjective: '', objective: '', assessmentProblems: '', assessmentDdx: [], planTx: '', planRx: '', planSummary: '', patientId: activePatient?.id });
@@ -118,12 +117,11 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
         setHistory(data.map((db: any) => {
             const linkedOrder = db.department_orders;
             const orderImages = (linkedOrder?.images || []).map((img: any) => typeof img === 'string' ? img : img.url).filter(Boolean);
-            return { id: db.id, patientId: db.patient_id, order_id: db.order_id, date: db.date, cc: db.cc, subjective: db.subjective, objective: db.objective, assessmentProblems: db.assessment_problems, assessment_ddx: db.assessment_ddx || [], planTx: db.plan_tx, planRx: db.plan_rx, plan_summary: db.plan_summary, images: orderImages };
+            return { id: db.id, patientId: db.patient_id, order_id: db.order_id, date: db.date, cc: db.cc, subjective: db.subjective, objective: db.objective, assessment_problems: db.assessment_problems, assessment_ddx: db.assessment_ddx || [], plan_tx: db.plan_tx, plan_rx: db.plan_rx, plan_summary: db.plan_summary, images: orderImages };
         }));
     }
   }, [activePatient]);
 
-  // 환자가 변경될 때 히스토리만 새로 불러옵니다. (에디터 초기화 로직은 App.tsx로 이동됨)
   useEffect(() => { 
       if (activePatient) { fetchHistory(); }
   }, [activePatient?.id, fetchHistory]);
@@ -216,16 +214,21 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
         onRemoveFromWaitlist={onRemoveFromWaitlist} onDragStart={(e, id, type) => { 
           setDraggedItemId(id); 
           setDraggedItemType(type);
+          e.dataTransfer.setData('drag-id', id);
+          e.dataTransfer.setData('drag-type', type);
           e.dataTransfer.setData('text/plain', id);
         }}
         onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); setDragOverId(null); }}
         onDrop={async (e, targetVetId) => {
           setDragOverId(null);
-          if (!draggedItemId) return;
-          if (draggedItemType === 'waitlist') {
-            await onUpdateWaitlist(draggedItemId, { vetId: targetVetId });
-          } else if (draggedItemType === 'patient') {
-            const p = patients.find(pat => pat.id === draggedItemId);
+          const dragId = e.dataTransfer.getData('drag-id') || e.dataTransfer.getData('text/plain') || draggedItemId;
+          const dragType = e.dataTransfer.getData('drag-type') || draggedItemType;
+
+          if (!dragId || !dragType) return;
+          if (dragType === 'waitlist') {
+            await onUpdateWaitlist(dragId, { vetId: targetVetId });
+          } else if (dragType === 'patient') {
+            const p = patients.find(pat => pat.id === dragId);
             if (p) {
               await onAddToWaitlist({ 
                 patientId: p.id, 
@@ -346,6 +349,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
           activeSoapId={currentSoap.id} 
           draftOrder={{ patient_id: activePatient?.id, patient_name: activePatient?.name }} 
           isSubmitting={false} 
+          onImageDoubleClick={onImageDoubleClick}
           onSave={async (vName, det, items, vId, sId, dept, imgs, status) => { 
             const soapId = sId || currentSoap.id;
             if (!soapId) {

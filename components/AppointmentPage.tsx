@@ -43,7 +43,7 @@ export const AppointmentPage: React.FC<AppointmentPageProps> = ({
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   
   // Sidebar State
-  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedVets, setCollapsedVets] = useState<Record<string, boolean>>({});
@@ -81,7 +81,7 @@ export const AppointmentPage: React.FC<AppointmentPageProps> = ({
   const handleResizeSidebar = useCallback((e: MouseEvent) => {
     if (isResizingSidebar) {
       const newWidth = e.clientX;
-      if (newWidth >= 250 && newWidth <= 500) setSidebarWidth(newWidth);
+      if (newWidth >= 200 && newWidth <= 450) setSidebarWidth(newWidth);
     }
   }, [isResizingSidebar]);
 
@@ -178,8 +178,11 @@ export const AppointmentPage: React.FC<AppointmentPageProps> = ({
 
   const handleCalendarDrop = (e: React.DragEvent, vetId: string, time: string) => {
     e.preventDefault();
-    if (draggedItemType === 'patient' || draggedItemType === 'waitlist') {
-      const patientId = draggedItemId;
+    const dragId = e.dataTransfer.getData('drag-id') || draggedItemId;
+    const dragType = e.dataTransfer.getData('drag-type') || draggedItemType;
+
+    if (dragType === 'patient' || dragType === 'waitlist') {
+      const patientId = dragId;
       const p = patients.find(pat => pat.id === patientId);
       if (p) {
         onSelectPatient(p.id);
@@ -268,13 +271,21 @@ export const AppointmentPage: React.FC<AppointmentPageProps> = ({
         collapsedVets={collapsedVets}
         onToggleVet={(id) => setCollapsedVets(prev => ({ ...prev, [id]: !prev[id] }))}
         onRemoveFromWaitlist={onRemoveFromWaitlist}
-        onDragStart={(e, id, type) => { setDraggedItemId(id); setDraggedItemType(type); e.dataTransfer.setData('text/plain', id); }}
+        onDragStart={(e, id, type) => { 
+          setDraggedItemId(id); 
+          setDraggedItemType(type); 
+          e.dataTransfer.setData('drag-id', id);
+          e.dataTransfer.setData('drag-type', type);
+        }}
         onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); }}
         onDrop={async (e, targetVetId) => {
-          if (!draggedItemId) return;
-          if (draggedItemType === 'waitlist') await onUpdateWaitlist(draggedItemId, { vetId: targetVetId });
-          else if (draggedItemType === 'patient') {
-            const p = patients.find(pat => pat.id === draggedItemId);
+          const dragId = e.dataTransfer.getData('drag-id') || draggedItemId;
+          const dragType = e.dataTransfer.getData('drag-type') || draggedItemType;
+
+          if (!dragId) return;
+          if (dragType === 'waitlist') await onUpdateWaitlist(dragId, { vetId: targetVetId });
+          else if (dragType === 'patient') {
+            const p = patients.find(pat => pat.id === dragId);
             if (p) await onAddToWaitlist({ patientId: p.id, patientName: p.name, breed: p.breed, ownerName: p.owner, vetId: targetVetId, type: 'Appointment' });
           }
         }}

@@ -65,7 +65,7 @@ export interface WaitlistEntry {
   patientName: string;
   breed: string;
   ownerName: string;
-  vetId: string;
+  vetId: string | null;
   time: string;
   memo: string;
   type: string;
@@ -163,6 +163,8 @@ export type DepartmentType = 'Treatment' | 'Pharmacy' | 'X-ray' | 'Ultrasound';
 export interface OrderImage {
   url: string;
   name: string;
+  uploadedAt?: string; // New: Timestamp of upload
+  description?: string; // New: Editable note
 }
 
 export interface DepartmentOrder {
@@ -178,6 +180,13 @@ export interface DepartmentOrder {
   images?: OrderImage[];
   order_index?: number;
   created_at?: string;
+  // Join 데이터 구조
+  patients?: { 
+    chart_number: string;
+  };
+  view_imaging_worklist?: {
+    accession_number: string;
+  }[];
 }
 
 export interface Breed {

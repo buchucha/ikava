@@ -100,7 +100,7 @@ export const SOAPEditor: React.FC<SOAPEditorProps> = ({
         onUpdate('images', [...(record.images || []), url]);
       }
     } catch (err) {
-      console.error("SOAP Image upload failed:", err);
+      console.error("SOAP Asset upload failed:", err);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -201,15 +201,27 @@ export const SOAPEditor: React.FC<SOAPEditorProps> = ({
         {activeStep === 'O' && renderObjective()}
         {activeStep === 'A' && renderAssessment()}
         {activeStep === 'P' && renderPlan()}
+        
+        {/* Linked Media List (PREVIEW REMOVED) */}
         {record.images && record.images.length > 0 && (
           <div className="mt-10 pt-6 border-t border-slate-200">
-             <div className="flex items-center gap-2 mb-4"><i className="fas fa-images text-blue-500 text-sm"></i><h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Linked Clinical Media</h3><span className="bg-slate-100 text-slate-400 text-[9px] px-1.5 py-0.5 rounded font-black">{record.images.length}</span></div>
+             <div className="flex items-center gap-2 mb-4"><i className="fas fa-images text-blue-500 text-sm"></i><h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Linked Clinical Assets</h3><span className="bg-slate-100 text-slate-400 text-[9px] px-1.5 py-0.5 rounded font-black">{record.images.length}</span></div>
              <div className="flex flex-wrap gap-3">
                {record.images.map((img, idx) => (
-                 <div key={idx} className="relative w-28 h-28 bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-zoom-in group">
-                    <img src={img} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" alt="" onClick={() => onImageDoubleClick(img)} />
-                    <button onClick={(e) => { e.stopPropagation(); removeImage(img); }} className="absolute top-1 right-1 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg"><i className="fas fa-times text-[10px]"></i></button>
-                    <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm px-2 py-1 border-t border-slate-100 flex items-center justify-between"><span className="text-[9px] font-black text-slate-600 truncate uppercase">Asset {idx + 1}</span><i className="fas fa-search-plus text-[8px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"></i></div>
+                 <div 
+                  key={idx} 
+                  onDoubleClick={() => onImageDoubleClick(img)}
+                  className="relative w-48 h-16 bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group flex items-center p-3 gap-3"
+                 >
+                    <div className="w-10 h-10 rounded-lg bg-white border border-slate-100 flex items-center justify-center text-slate-300 group-hover:text-blue-500">
+                       <i className="fas fa-file-image text-lg"></i>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                       <span className="text-[10px] font-black text-slate-800 uppercase block truncate">Asset {idx + 1}</span>
+                       <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Linked from Order</span>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); removeImage(img); }} className="text-slate-300 hover:text-rose-500 transition-colors"><i className="fas fa-times"></i></button>
+                    <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100"><i className="fas fa-search-plus text-[8px] text-blue-400"></i></div>
                  </div>
                ))}
              </div>

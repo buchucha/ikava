@@ -119,7 +119,24 @@ const App: React.FC = () => {
           <ReceptionPage 
             patients={patients} vets={vets} waitlist={waitlist} selectedPatientId={selectedPatientId || ''} showDashboard={true} onSelectPatient={handleSelectPatient}
             onRegisterPatient={async (data) => {
-              const { data: newP, error } = await supabase.from('patients').insert([{ ...data, chart_number: data.chartNumber }]).select();
+              // Auto-generate chart number if empty
+              let chartNum = data.chart_number || (data as any).chartNumber;
+              
+              if (!chartNum || String(chartNum).trim() === '') {
+                // Fetch all current chart numbers to find the max
+                const { data: allPatients } = await supabase.from('patients').select('chart_number');
+                if (allPatients) {
+                  const maxNum = allPatients.reduce((max, p) => {
+                    const num = parseInt(p.chart_number, 10);
+                    return !isNaN(num) && num > max ? num : max;
+                  }, 0);
+                  chartNum = (maxNum + 1).toString();
+                } else {
+                  chartNum = "1";
+                }
+              }
+
+              const { data: newP, error } = await supabase.from('patients').insert([{ ...data, chart_number: chartNum }]).select();
               if (!error && newP) { fetchData(); return mapDbPatient(newP[0]); }
               return null;
             }}

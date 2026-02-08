@@ -17,7 +17,7 @@ interface PatientSidebarProps {
   onRemoveFromWaitlist: (id: string) => void;
   onDragStart: (e: React.DragEvent, id: string, type: 'patient' | 'waitlist') => void;
   onDragEnd: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent, targetVetId: string) => void;
+  onDrop: (e: React.DragEvent, targetVetId: string | null) => void;
   onStartResizing: () => void;
   dragOverId: string | null;
   setDragOverId: (id: string | null) => void;
@@ -75,7 +75,9 @@ export const PatientSidebar: React.FC<PatientSidebarProps> = ({
                 key={p.id} 
                 draggable
                 onDragStart={(e) => {
-                  e.dataTransfer.setData('text/plain', p.id);
+                  e.dataTransfer.setData('drag-id', p.id);
+                  e.dataTransfer.setData('drag-type', 'patient');
+                  e.dataTransfer.setData('text/plain', p.id); // Fallback
                   onDragStart(e, p.id, 'patient');
                 }}
                 onDragEnd={onDragEnd}
@@ -136,7 +138,9 @@ export const PatientSidebar: React.FC<PatientSidebarProps> = ({
                       key={w.id} 
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', w.patientId);
+                        e.dataTransfer.setData('drag-id', w.id);
+                        e.dataTransfer.setData('drag-type', 'waitlist');
+                        e.dataTransfer.setData('text/plain', w.id); // Fallback
                         onDragStart(e, w.id, 'waitlist');
                       }}
                       onDragEnd={onDragEnd}
@@ -168,7 +172,7 @@ export const PatientSidebar: React.FC<PatientSidebarProps> = ({
             className={`mt-2 border border-transparent rounded ${dragOverId === 'unassigned' ? 'bg-amber-50 border-amber-300' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragOverId('unassigned'); }}
             onDragLeave={() => setDragOverId(null)}
-            onDrop={(e) => onDrop(e, '')}
+            onDrop={(e) => onDrop(e, null)}
           >
             <div 
               onClick={() => onToggleVet('unassigned')}
@@ -184,7 +188,9 @@ export const PatientSidebar: React.FC<PatientSidebarProps> = ({
                     key={w.id} 
                     draggable 
                     onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', w.patientId);
+                      e.dataTransfer.setData('drag-id', w.id);
+                      e.dataTransfer.setData('drag-type', 'waitlist');
+                      e.dataTransfer.setData('text/plain', w.id); // Fallback
                       onDragStart(e, w.id, 'waitlist');
                     }}
                     onDragEnd={onDragEnd}
