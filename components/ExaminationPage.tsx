@@ -44,22 +44,73 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [draggedItemType, setDraggedItemType] = useState<'patient' | 'waitlist' | 'order' | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dragOverOrderId, setDragOverOrderId] = useState<string | null>(null);
+  const [dragSourceDept, setDragSourceDept] = useState<DepartmentType | null>(null);
   const [isDropZoneOver, setIsDropZoneOver] = useState(false);
 
   const fetchOrders = async () => {
-    setIsLoading(true);
-    // patients(chart_number) 와 view_imaging_worklist(accession_number)를 조인합니다.
-    const { data } = await supabase
-      .from('department_orders')
-      .select(`
-        *,
-        patients(chart_number),
-        view_imaging_worklist(accession_number)
-      `)
-      .order('created_at', { ascending: false });
+  setIsLoading(true);
+  
+  // 1단계: 오더 + 차트번호만 가져오기
+  const { data } = await supabase
+    .from('department_orders')
+    .select(`
+      *,
+      patients(chart_number)
+    `)
+    .order('created_at', { ascending: false });
+  
+  if (data) {
+    // 2단계: X-ray Pending 오더의 accession_number를 별도 조회
+    const xrayIds = data.filter(o => o.department === 'X-ray' && o.status === 'Pending').map(o => o.id);
     
-    if (data) setOrders(data);
-    setIsLoading(false);
+    if (xrayIds.length > 0) {
+      const { data: wlData } = await supabase
+        .from('department_orders')
+        .select('id, accession_number')
+        .in('id', xrayIds);
+      
+      // accession_number를 오더에 합치기
+      const accMap = new Map(wlData?.map(w => [w.id, w.accession_number]) || []);
+      data.forEach(o => {
+        if (accMap.has(o.id)) {
+          (o as any).accession_number = accMap.get(o.id);
+        }
+      });
+    }
+    
+    setOrders(data);
+  }
+  setIsLoading(false);
+};
+
+
+  const handleReorderDrop = async (targetOrderId: string, targetDept: DepartmentType) => {
+    if (!draggedItemId || draggedItemId === targetOrderId || draggedItemType !== 'order') return;
+    if (dragSourceDept !== targetDept) return;
+
+    const deptOrders = orders
+      .filter(o => o.department === targetDept && o.status !== 'Completed')
+      .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+    const fromIndex = deptOrders.findIndex(o => o.id === draggedItemId);
+    const toIndex = deptOrders.findIndex(o => o.id === targetOrderId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const reordered = [...deptOrders];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+
+    const updatedOrders = orders.map(o => {
+      const newIdx = reordered.findIndex(r => r.id === o.id);
+      if (newIdx !== -1) return { ...o, order_index: newIdx };
+      return o;
+    });
+    setOrders(updatedOrders);
+
+    for (let i = 0; i < reordered.length; i++) {
+      await supabase.from('department_orders').update({ order_index: i }).eq('id', reordered[i].id);
+    }
   };
 
   useEffect(() => {
@@ -169,7 +220,7 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
 
         <div className="flex-1 grid grid-cols-4 gap-1 p-1 overflow-hidden">
           {DEPT_CONFIG.map((dept) => {
-            const deptOrders = orders.filter(o => viewMode === 'Pending' ? (o.department === dept.type && o.status !== 'Completed') : (o.department === dept.type && o.status === 'Completed' && o.patient_id === activePatient?.id));
+            const deptOrders = orders.filter(o => viewMode === 'Pending' ? (o.department === dept.type && o.status !== 'Completed') : (o.department === dept.type && o.status === 'Completed' && o.patient_id === activePatient?.id)).sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
 
             return (
               <div key={dept.type} onDoubleClick={() => viewMode === 'Pending' && setIsModalOpen(true)} className="flex flex-col bg-white/40 border border-slate-300 rounded overflow-hidden group">
@@ -184,16 +235,19 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
                 <div className="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-3">
                   {deptOrders.map(order => {
                     const chartNum = order.patients?.chart_number || '0';
-                    const accessionNum = order.view_imaging_worklist?.[0]?.accession_number;
+                    const accessionNum = (order as any).accession_number;
 
                     return (
                       <div 
                         key={order.id} 
                         draggable={viewMode === 'Pending'}
-                        onDragStart={() => { setDraggedItemId(order.id); setDraggedItemType('order'); }}
-                        onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); setIsDropZoneOver(false); }}
+                        onDragStart={() => { setDraggedItemId(order.id); setDraggedItemType('order'); setDragSourceDept(dept.type); }}
+                        onDragEnd={() => { setDraggedItemId(null); setDraggedItemType(null); setIsDropZoneOver(false); setDragOverOrderId(null); setDragSourceDept(null); }}
+                        onDragOver={(e) => { e.preventDefault(); if (draggedItemType === 'order' && dragSourceDept === dept.type) setDragOverOrderId(order.id); }}
+                        onDragLeave={() => setDragOverOrderId(null)}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleReorderDrop(order.id, dept.type); setDragOverOrderId(null); }}
                         onClick={() => { setEditingOrder(order); setPreSelectedDept(null); setIsModalOpen(true); }}
-                        className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md hover:border-blue-500 transition-all cursor-pointer group flex flex-col h-auto relative"
+                        className={`bg-white border rounded-xl p-3 shadow-sm hover:shadow-md hover:border-blue-500 transition-all cursor-pointer group flex flex-col h-auto relative ${dragOverOrderId === order.id ? 'border-blue-500 border-2 bg-blue-50' : 'border-slate-200'}`}
                       >
                         <div className="flex justify-between items-start mb-2">
                           <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${getStatusStyle(order.status)}`}>{order.status}</span>
@@ -227,7 +281,7 @@ export const ExaminationPage: React.FC<ExaminationPageProps> = ({
                         </div>
 
                         {/* NAS / VIEW IMAGING WORKLIST INFO (Accession Number) */}
-                        {accessionNum && (
+                        {accessionNum && order.department === 'X-ray' && (
                           <div className="mt-3 pt-2.5 border-t-2 border-dashed border-slate-100 flex flex-col gap-1.5 bg-blue-900/5 -mx-3 -mb-3 px-3 py-2.5 rounded-b-xl">
                              <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
